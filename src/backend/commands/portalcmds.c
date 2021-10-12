@@ -24,6 +24,7 @@
 #include <limits.h>
 
 #include "access/xact.h"
+#include "access/gcursor.h"
 #include "commands/portalcmds.h"
 #include "executor/executor.h"
 #include "executor/tstoreReceiver.h"
@@ -49,6 +50,7 @@ PerformCursorOpen(ParseState *pstate, DeclareCursorStmt *cstmt, ParamListInfo pa
 	Portal		portal;
 	MemoryContext oldContext;
 	char	   *queryString;
+	bool is_multi_cursor;
 
 	/*
 	 * Disallow empty-string cursor name (conflicts with protocol-level
@@ -58,6 +60,17 @@ PerformCursorOpen(ParseState *pstate, DeclareCursorStmt *cstmt, ParamListInfo pa
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_CURSOR_NAME),
 				 errmsg("invalid cursor name: must not be empty")));
+
+	/*
+	 * Check if setting a global cursor
+	 */
+	is_multi_cursor = (strncmp(GLOBAL_CURSOR_NAME_PREFIX, cstmt->portalname, strlen(GLOBAL_CURSOR_NAME_PREFIX)) == 0);
+	if (is_multi_cursor)
+	{
+		ResetGlobalCursor();
+		int num_part = strtol(cstmt->portalname + strlen(GLOBAL_CURSOR_NAME_PREFIX), NULL, 10);
+		GlobalCursorSetNumPartition(num_part);
+	}
 
 	/*
 	 * If this is a non-holdable cursor, we require that this statement has
@@ -90,6 +103,12 @@ PerformCursorOpen(ParseState *pstate, DeclareCursorStmt *cstmt, ParamListInfo pa
 
 	/* Plan the query, applying the specified options */
 	plan = pg_plan_query(query, pstate->p_sourcetext, cstmt->options, params);
+
+	/* Serialize plan to shared memory */
+	if (is_multi_cursor)
+	{
+		GlobalCursorSetPlan(plan);
+	}
 
 	/*
 	 * Create a portal and copy the plan and query string into its memory.
@@ -140,6 +159,12 @@ PerformCursorOpen(ParseState *pstate, DeclareCursorStmt *cstmt, ParamListInfo pa
 			portal->cursorOptions |= CURSOR_OPT_NO_SCROLL;
 	}
 
+	/* Sync options to shared memory */
+	if (is_multi_cursor)
+	{
+		GlobalCursorSetOption(portal->cursorOptions);
+	}
+
 	/*
 	 * Start execution, inserting parameters if any.
 	 */
@@ -184,10 +209,51 @@ PerformPortalFetch(FetchStmt *stmt,
 	portal = GetPortalByName(stmt->portalname);
 	if (!PortalIsValid(portal))
 	{
-		ereport(ERROR,
-				(errcode(ERRCODE_UNDEFINED_CURSOR),
-				 errmsg("cursor \"%s\" does not exist", stmt->portalname)));
-		return;					/* keep compiler happy */
+		if (strncmp(GLOBAL_CURSOR_NAME_PREFIX, stmt->portalname, strlen(GLOBAL_CURSOR_NAME_PREFIX)) == 0)
+		{
+			MemoryContext oldContext;
+			PlannedStmt *plan;
+			char *queryString;
+
+			int part_id = strtol(stmt->portalname + strlen(GLOBAL_CURSOR_NAME_PREFIX), NULL, 10);
+			if (part_id < 0 || part_id >= GlobalCursorGetNumPartition())
+			{
+				elog(ERROR, "got partition id %d not within [0, %d)", part_id, GlobalCursorGetNumPartition());
+			}
+			GlobalCursorSetPartitionID(part_id);
+			elog(DEBUG1, "current session global cursor partition: %d", GlobalCursorGetPartitionID());
+
+			plan = GlobalCursorGetPlan();
+
+			/* Create a portal like in CursorOpen */
+			portal = CreatePortal(stmt->portalname, false, false);
+
+			oldContext = MemoryContextSwitchTo(portal->portalContext);
+
+			queryString = ""; // hardcode - seems like no need queryString for execution
+
+			PortalDefineQuery(portal,
+							  NULL,
+							  queryString,
+							  CMDTAG_SELECT, /* cursor's query is always a SELECT */
+							  list_make1(plan),
+							  NULL);
+
+			MemoryContextSwitchTo(oldContext);
+
+			portal->cursorOptions = GlobalCursorGetOption();
+
+			PortalStart(portal, NULL, 0, InvalidSnapshot); // hardcode only support params = NULL
+
+			Assert(portal->strategy == PORTAL_ONE_SELECT);
+		}
+		else
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_UNDEFINED_CURSOR),
+					 errmsg("cursor \"%s\" does not exist", stmt->portalname)));
+			return;					/* keep compiler happy */
+		}
 	}
 
 	/* Adjust dest if needed.  MOVE wants destination DestNone */

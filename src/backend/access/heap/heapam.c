@@ -32,6 +32,7 @@
 #include "postgres.h"
 
 #include "access/bufmask.h"
+#include "access/gcursor.h"
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "access/heapam_xlog.h"
@@ -320,6 +321,25 @@ initscan(HeapScanDesc scan, ScanKey key, bool keep_startblock)
 	ItemPointerSetInvalid(&scan->rs_ctup.t_self);
 	scan->rs_cbuf = InvalidBuffer;
 	scan->rs_cblock = InvalidBlockNumber;
+
+	/* If in multi-cursor mode, each cursor only scan a portion amount of blocks */
+	if (scan->rs_base.rs_rd->rd_id == GlobalCursorGetRelationOid() && GlobalCursorGetPartitionID() >= 0)
+	{
+		// no need to start from optimal block due to prallel
+		scan->rs_base.rs_flags &= ~SO_ALLOW_SYNC;
+		scan->rs_startblock = 0;
+
+		int part_id = GlobalCursorGetPartitionID();
+		int part_num = GlobalCursorGetNumPartition();
+		if (part_id >= part_num)
+		{
+			elog(ERROR, "partition id %d >= partition num %d!", part_id, part_num);
+		}
+		heap_setscanlimits(scan,
+						   part_id * (scan->rs_nblocks / part_num) + Min(scan->rs_nblocks % part_num, part_id),
+						   scan->rs_nblocks / part_num + (scan->rs_nblocks % part_num > part_id ? 1 : 0));
+		elog(DEBUG1, "global cursor (%d/%d) total blocks: %d, start block: %d, scan blocks: %d", part_id + 1, part_num, scan->rs_nblocks, scan->rs_startblock, scan->rs_numblocks);
+	}
 
 	/* page-at-a-time fields are always invalid when not rs_inited */
 
