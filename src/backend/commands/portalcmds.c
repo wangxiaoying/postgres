@@ -226,6 +226,7 @@ PerformPortalFetch(FetchStmt *stmt,
 			plan = GlobalCursorGetPlan();
 
 			/* Create a portal like in CursorOpen */
+            elog(DEBUG1, "create portal: %s", stmt->portalname);
 			portal = CreatePortal(stmt->portalname, false, false);
 
 			oldContext = MemoryContextSwitchTo(portal->portalContext);
@@ -254,11 +255,21 @@ PerformPortalFetch(FetchStmt *stmt,
 					 errmsg("cursor \"%s\" does not exist", stmt->portalname)));
 			return;					/* keep compiler happy */
 		}
-	}
+	} else {
+        elog(DEBUG1, "got portal: %s", stmt->portalname);
+    }
 
 	/* Adjust dest if needed.  MOVE wants destination DestNone */
 	if (stmt->ismove)
 		dest = None_Receiver;
+
+    if (dest == None_Receiver) {
+        elog(DEBUG1, "dest none! create one");
+        dest = CreateDestReceiver(DestRemote);
+		SetRemoteDestReceiverParams(dest, portal);
+    } else {
+        elog(DEBUG1, "dest not none!");
+    }
 
 	/* Do it */
 	nprocessed = PortalRunFetch(portal,

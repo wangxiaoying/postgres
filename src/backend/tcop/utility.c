@@ -16,6 +16,7 @@
  */
 #include "postgres.h"
 
+#include "access/gcursor.h"
 #include "access/htup_details.h"
 #include "access/reloptions.h"
 #include "access/twophase.h"
@@ -2019,8 +2020,13 @@ UtilityReturnsTuples(Node *parsetree)
 				if (stmt->ismove)
 					return false;
 				portal = GetPortalByName(stmt->portalname);
-				if (!PortalIsValid(portal))
+				if (!PortalIsValid(portal)) { 
+                    if (strncmp(GLOBAL_CURSOR_NAME_PREFIX, stmt->portalname, strlen(GLOBAL_CURSOR_NAME_PREFIX)) == 0) {
+                        return true;
+                    }
+                    elog(DEBUG1, "cursor name not valid!");
 					return false;	/* not our business to raise error */
+                }
 				return portal->tupDesc ? true : false;
 			}
 
@@ -2072,8 +2078,50 @@ UtilityTupleDescriptor(Node *parsetree)
 				if (stmt->ismove)
 					return NULL;
 				portal = GetPortalByName(stmt->portalname);
-				if (!PortalIsValid(portal))
-					return NULL;	/* not our business to raise error */
+				if (!PortalIsValid(portal)) {
+                    if (strncmp(GLOBAL_CURSOR_NAME_PREFIX, stmt->portalname, strlen(GLOBAL_CURSOR_NAME_PREFIX)) == 0) {
+                        MemoryContext oldContext;
+			            PlannedStmt *plan;
+			            char *queryString;
+
+			            int part_id = strtol(stmt->portalname + strlen(GLOBAL_CURSOR_NAME_PREFIX), NULL, 10);
+			            if (part_id < 0 || part_id >= GlobalCursorGetNumPartition())
+			            {
+			            	elog(ERROR, "got partition id %d not within [0, %d)", part_id, GlobalCursorGetNumPartition());
+			            }
+			            GlobalCursorSetPartitionID(part_id);
+			            elog(DEBUG1, "current session global cursor partition: %d", GlobalCursorGetPartitionID());
+
+			            plan = GlobalCursorGetPlan();
+
+			            /* Create a portal like in CursorOpen */
+                        elog(DEBUG1, "create portal: %s", stmt->portalname);
+			            portal = CreatePortal(stmt->portalname, false, false);
+
+			            oldContext = MemoryContextSwitchTo(portal->portalContext);
+
+			            queryString = ""; // hardcode - seems like no need queryString for execution
+
+			            PortalDefineQuery(portal,
+			            				  NULL,
+			            				  queryString,
+			            				  CMDTAG_SELECT, /* cursor's query is always a SELECT */
+			            				  list_make1(plan),
+			            				  NULL);
+
+			            MemoryContextSwitchTo(oldContext);
+
+			            portal->cursorOptions = GlobalCursorGetOption();
+			            MemoryContextSwitchTo(oldContext);
+
+			            PortalStart(portal, NULL, 0, InvalidSnapshot); // hardcode only support params = NULL
+
+			            Assert(portal->strategy == PORTAL_ONE_SELECT);
+                    }
+                    else {
+					    return NULL;	/* not our business to raise error */
+                    }
+                }
 				return CreateTupleDescCopy(portal->tupDesc);
 			}
 

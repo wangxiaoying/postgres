@@ -36,6 +36,7 @@
 #include "rusagestub.h"
 #endif
 
+#include "access/gcursor.h"
 #include "access/parallel.h"
 #include "access/printtup.h"
 #include "access/xact.h"
@@ -1211,6 +1212,7 @@ exec_simple_query(const char *query_string)
 		/*
 		 * Run the portal to completion, and then drop it (and the receiver).
 		 */
+
 		(void) PortalRun(portal,
 						 FETCH_ALL,
 						 true,	/* always top level */
@@ -2621,7 +2623,9 @@ exec_describe_statement_message(const char *stmt_name)
 								  NULL);
 	}
 	else
+    {
 		pq_putemptymessage('n');	/* NoData */
+    }
 
 }
 
@@ -2675,7 +2679,9 @@ exec_describe_portal_message(const char *portal_name)
 								  FetchPortalTargetList(portal),
 								  portal->formats);
 	else
+    {
 		pq_putemptymessage('n');	/* NoData */
+    }
 }
 
 
@@ -4476,6 +4482,8 @@ PostgresMain(const char *dbname, const char *username)
 		if (ignore_till_sync && firstchar != EOF)
 			continue;
 
+        elog(DEBUG1, "get cmd: %c", firstchar);
+
 		switch (firstchar)
 		{
 			case 'Q':			/* simple query */
@@ -4523,6 +4531,8 @@ PostgresMain(const char *dbname, const char *username)
 					}
 					pq_getmsgend(&input_message);
 
+                    elog(DEBUG1, "parse: %s, %s, %d, %d", query_string, stmt_name, paramTypes, numParams);
+
 					exec_parse_message(query_string, stmt_name,
 									   paramTypes, numParams);
 				}
@@ -4555,6 +4565,7 @@ PostgresMain(const char *dbname, const char *username)
 					max_rows = pq_getmsgint(&input_message, 4);
 					pq_getmsgend(&input_message);
 
+                    elog(DEBUG1, "execute portal_name: %s, max_rows: %d", portal_name, max_rows);
 					exec_execute_message(portal_name, max_rows);
 				}
 				break;
@@ -4649,6 +4660,8 @@ PostgresMain(const char *dbname, const char *username)
 					describe_type = pq_getmsgbyte(&input_message);
 					describe_target = pq_getmsgstring(&input_message);
 					pq_getmsgend(&input_message);
+
+                    elog(DEBUG1, "describe_type: %d, describe_target: %s", describe_type, describe_target);
 
 					switch (describe_type)
 					{
