@@ -410,6 +410,12 @@ ExecInitNode(Plan *node, EState *estate, int eflags)
 		result->instrument = InstrAlloc(1, estate->es_instrument,
 										result->async_capable);
 
+    if (node->reader != NULL)
+    {
+        elog(DEBUG1, "set reader to planstate!");
+        result->reader = node->reader;
+    }
+
 	return result;
 }
 

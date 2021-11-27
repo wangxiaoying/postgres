@@ -28,6 +28,7 @@ OBJS = \
 	toast_compression.o \
 	toast_internals.o \
 	tupconvert.o \
-	tupdesc.o
+	tupdesc.o \
+	mixdest.o
 
 include $(top_srcdir)/src/backend/common.mk

@@ -16,6 +16,7 @@
 
 #include "access/tupconvert.h"
 #include "executor/instrument.h"
+#include "executor/tqueue.h"
 #include "fmgr.h"
 #include "lib/ilist.h"
 #include "lib/pairingheap.h"
@@ -1049,6 +1050,8 @@ typedef struct PlanState
 	bool		outeropsset;
 	bool		inneropsset;
 	bool		resultopsset;
+
+    TupleQueueReader *reader; // if reader is set, do not really execute the plan, read from reader
 } PlanState;
 
 /* ----------------

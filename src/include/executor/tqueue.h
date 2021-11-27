@@ -19,6 +19,7 @@
 
 /* Opaque struct, only known inside tqueue.c. */
 typedef struct TupleQueueReader TupleQueueReader;
+typedef struct TQueueDestReceiver TQueueDestReceiver;
 
 /* Use this to send tuples to a shm_mq. */
 extern DestReceiver *CreateTupleQueueDestReceiver(shm_mq_handle *handle);

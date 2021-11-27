@@ -49,6 +49,8 @@
 #include "commands/trigger.h"
 #include "executor/execdebug.h"
 #include "executor/nodeSubplan.h"
+#include "executor/tqueue.h"
+#include "executor/tuptable.h"
 #include "foreign/fdwapi.h"
 #include "jit/jit.h"
 #include "mb/pg_wchar.h"
@@ -1515,6 +1517,8 @@ ExecutePlan(EState *estate,
 {
 	TupleTableSlot *slot;
 	uint64		current_tuple_count;
+    MinimalTuple tup;
+    bool read_done;
 
 	/*
 	 * initialize local variables
@@ -1537,6 +1541,11 @@ ExecutePlan(EState *estate,
 	if (use_parallel_mode)
 		EnterParallelMode();
 
+    if (planstate->reader != NULL)
+    {
+        slot = ExecInitExtraTupleSlot(estate, planstate->ps_ResultTupleDesc, &TTSOpsMinimalTuple);
+    }
+
 	/*
 	 * Loop until we've processed the proper number of tuples from the plan.
 	 */
@@ -1548,14 +1557,30 @@ ExecutePlan(EState *estate,
 		/*
 		 * Execute the plan and obtain a tuple
 		 */
-		slot = ExecProcNode(planstate);
+        if (planstate->reader == NULL)
+        {
+		    slot = ExecProcNode(planstate);
+        }
+        else
+        {
+            tup = TupleQueueReaderNext(planstate->reader, false, &read_done);
+            if (read_done)
+            {
+                elog(DEBUG1, "done reading from reader!");
+                break;
+            }
+            ExecForceStoreMinimalTuple(tup, slot, false);
+        }
 
 		/*
 		 * if the tuple is null, then we assume there is nothing more to
 		 * process so we just end the loop...
 		 */
 		if (TupIsNull(slot))
+        {
+            elog(DEBUG1, "is null, break! %p", slot);
 			break;
+        }
 
 		/*
 		 * If we have a junk filter, then project a new tuple with the junk

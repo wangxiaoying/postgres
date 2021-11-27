@@ -23,6 +23,8 @@
 
 #include <limits.h>
 
+#include "access/gcursor.h"
+#include "access/mixdest.h"
 #include "access/xact.h"
 #include "commands/portalcmds.h"
 #include "executor/executor.h"
@@ -33,6 +35,8 @@
 #include "tcop/tcopprot.h"
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
+#include "storage/shm_toc.h"
+#include "storage/shm_mq.h"
 
 
 /*
@@ -49,6 +53,7 @@ PerformCursorOpen(ParseState *pstate, DeclareCursorStmt *cstmt, ParamListInfo pa
 	Portal		portal;
 	MemoryContext oldContext;
 	char	   *queryString;
+    bool is_multi_cursor;
 
 	/*
 	 * Disallow empty-string cursor name (conflicts with protocol-level
@@ -58,6 +63,17 @@ PerformCursorOpen(ParseState *pstate, DeclareCursorStmt *cstmt, ParamListInfo pa
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_CURSOR_NAME),
 				 errmsg("invalid cursor name: must not be empty")));
+
+    /*
+	 * Check if setting a global cursor
+	 */
+	is_multi_cursor = (strncmp(GLOBAL_CURSOR_NAME_PREFIX, cstmt->portalname, strlen(GLOBAL_CURSOR_NAME_PREFIX)) == 0);
+	if (is_multi_cursor)
+	{
+		ResetGlobalCursor();
+		int num_part = strtol(cstmt->portalname + strlen(GLOBAL_CURSOR_NAME_PREFIX), NULL, 10);
+		GlobalCursorSetNumPartition(num_part);
+	}
 
 	/*
 	 * If this is a non-holdable cursor, we require that this statement has
@@ -90,6 +106,12 @@ PerformCursorOpen(ParseState *pstate, DeclareCursorStmt *cstmt, ParamListInfo pa
 
 	/* Plan the query, applying the specified options */
 	plan = pg_plan_query(query, pstate->p_sourcetext, cstmt->options, params);
+
+    /* Serialize plan to shared memory */
+	if (is_multi_cursor)
+	{
+		GlobalCursorSetPlan(plan);
+	}
 
 	/*
 	 * Create a portal and copy the plan and query string into its memory.
@@ -140,6 +162,12 @@ PerformCursorOpen(ParseState *pstate, DeclareCursorStmt *cstmt, ParamListInfo pa
 			portal->cursorOptions |= CURSOR_OPT_NO_SCROLL;
 	}
 
+    /* Sync options to shared memory */
+	if (is_multi_cursor)
+	{
+		GlobalCursorSetOption(portal->cursorOptions);
+	}
+
 	/*
 	 * Start execution, inserting parameters if any.
 	 */
@@ -170,6 +198,16 @@ PerformPortalFetch(FetchStmt *stmt,
 {
 	Portal		portal;
 	uint64		nprocessed;
+	dsm_segment *seg = NULL;
+	shm_toc    *toc;
+	gcursor_shm_header *hdr;
+    shm_mq_handle **handles = NULL;
+    TupleQueueReader *reader = NULL;
+    shm_mq_handle *handle = NULL;
+
+    int part_num;
+    int i;
+    bool is_first = false;
 
 	/*
 	 * Disallow empty-string cursor name (conflicts with protocol-level
@@ -184,10 +222,130 @@ PerformPortalFetch(FetchStmt *stmt,
 	portal = GetPortalByName(stmt->portalname);
 	if (!PortalIsValid(portal))
 	{
-		ereport(ERROR,
-				(errcode(ERRCODE_UNDEFINED_CURSOR),
-				 errmsg("cursor \"%s\" does not exist", stmt->portalname)));
-		return;					/* keep compiler happy */
+        if (strncmp(GLOBAL_CURSOR_NAME_PREFIX, stmt->portalname, strlen(GLOBAL_CURSOR_NAME_PREFIX)) == 0)
+		{
+			MemoryContext oldContext;
+			PlannedStmt *plan;
+			char *queryString;
+            int part_id;
+
+			part_id = strtol(stmt->portalname + strlen(GLOBAL_CURSOR_NAME_PREFIX), NULL, 10);
+            part_num = GlobalCursorGetNumPartition();
+			if (part_id < 0 || part_id >= part_num)
+			{
+				elog(ERROR, "got partition id %d not within [0, %d)", part_id, part_num);
+			}
+			GlobalCursorSetPartitionID(part_id);
+			elog(DEBUG1, "current session global cursor partition: %d", GlobalCursorGetPartitionID());
+			plan = GlobalCursorGetPlan();
+
+            GlobalCursorLock();
+            Datum main_arg = GlobalCursorGetMainArg();
+            if (main_arg == NULL)
+            {
+                is_first = true;
+                elog(DEBUG1, "the first global cursor, execute real plan");
+
+                shm_toc_estimator e;
+	            Size		segsize;
+                char    *queuespace;
+
+                shm_toc_initialize_estimator(&e);
+	            shm_toc_estimate_chunk(&e, sizeof(gcursor_shm_header));
+                shm_toc_estimate_chunk(&e, mul_size(GLOBAL_CURSOR_QUEUE_SIZE, part_num-1));
+	            shm_toc_estimate_keys(&e, 2); // 1 for header, 1 for queues
+	            segsize = shm_toc_estimate(&e);
+                seg = dsm_create(shm_toc_estimate(&e), 0);
+                toc = shm_toc_create(GLOBAL_CURSOR_MAGIC, dsm_segment_address(seg), segsize);
+
+                /* Set up the header region. */
+	            hdr = shm_toc_allocate(toc, sizeof(gcursor_shm_header));
+	            SpinLockInit(&hdr->mutex);
+	            shm_toc_insert(toc, 0, hdr);
+
+                /* Allocate memory for shared memory queue handles. */
+            	handles = (shm_mq_handle **) palloc((part_num-1) * sizeof(shm_mq_handle *));
+                queuespace = shm_toc_allocate(toc, mul_size(GLOBAL_CURSOR_QUEUE_SIZE, part_num-1));
+
+                for (i = 0; i < part_num-1; ++i)
+	            {
+	            	shm_mq	   *mq;
+	            	mq = shm_mq_create(queuespace + ((Size) i) * GLOBAL_CURSOR_QUEUE_SIZE, (Size) GLOBAL_CURSOR_QUEUE_SIZE);
+	            	shm_mq_set_sender(mq, MyProc);
+	            	handles[i] = shm_mq_attach(mq, seg, NULL);
+	            }
+                shm_toc_insert(toc, 1, queuespace);
+
+                // wrapup current dest with mixdest
+                dest = CreateMixDest(dest, part_num, handles);
+                GlobalCursorSetMainArg(UInt32GetDatum(dsm_segment_handle(seg)));
+            }
+            else
+            {
+                elog(DEBUG1, "NOT the first global cursor, receive data from the first's result");
+
+                int qid;
+                char	   *mqspace;
+	            shm_mq	   *mq;
+
+                seg = dsm_attach(DatumGetInt32(main_arg));
+            	if (seg == NULL)
+                {
+            		elog(DEBUG1, "unable to map dynamic shared memory segment");
+                    return;
+                }
+
+                toc = shm_toc_attach(GLOBAL_CURSOR_MAGIC, dsm_segment_address(seg));
+	            if (toc == NULL)
+	            	ereport(ERROR,
+	            			(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+	            			 errmsg("bad magic number in dynamic shared memory segment")));
+
+                // get current queue number
+                qid = GlobalCursorGetAttached();
+
+	            mqspace = shm_toc_lookup(toc, 1, false);
+	            mqspace += qid * GLOBAL_CURSOR_QUEUE_SIZE;
+	            mq = (shm_mq *) mqspace;
+	            shm_mq_set_receiver(mq, MyProc);
+                handle = shm_mq_attach(mq, seg, NULL); 
+                reader = CreateTupleQueueReader(handle);
+                plan->planTree->reader = reader;
+
+                // queue number +1
+                GlobalCursorIncrementAttached();
+            }
+            GlobalCursorUnlock();
+
+			/* Create a portal like in CursorOpen */
+			portal = CreatePortal(stmt->portalname, false, false);
+
+			oldContext = MemoryContextSwitchTo(portal->portalContext);
+
+			queryString = ""; // hardcode - seems like no need queryString for execution
+
+			PortalDefineQuery(portal,
+							  NULL,
+							  queryString,
+							  CMDTAG_SELECT, /* cursor's query is always a SELECT */
+							  list_make1(plan),
+							  NULL);
+
+			MemoryContextSwitchTo(oldContext);
+
+			portal->cursorOptions = GlobalCursorGetOption();
+
+			PortalStart(portal, NULL, 0, InvalidSnapshot); // hardcode only support params = NULL
+
+			Assert(portal->strategy == PORTAL_ONE_SELECT);
+		}
+		else
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_UNDEFINED_CURSOR),
+					 errmsg("cursor \"%s\" does not exist", stmt->portalname)));
+			return;					/* keep compiler happy */
+		}
 	}
 
 	/* Adjust dest if needed.  MOVE wants destination DestNone */
@@ -195,6 +353,7 @@ PerformPortalFetch(FetchStmt *stmt,
 		dest = None_Receiver;
 
 	/* Do it */
+    elog(DEBUG1, "PortalRunFetch");
 	nprocessed = PortalRunFetch(portal,
 								stmt->direction,
 								stmt->howMany,
@@ -204,6 +363,25 @@ PerformPortalFetch(FetchStmt *stmt,
 	if (qc)
 		SetQueryCompletion(qc, stmt->ismove ? CMDTAG_MOVE : CMDTAG_FETCH,
 						   nprocessed);
+
+
+    GlobalCursorLock();
+    if (is_first)
+    {
+        elog(DEBUG1, "start freeing the first global cursor");
+        // detach from queues and free handles
+        MixDestShutDownTQueues(dest);
+    	pfree(handles);
+    }
+    else
+    {
+        elog(DEBUG1, "start freeing NOT the first global cursor");
+        shm_mq_detach(handle);
+        DestroyTupleQueueReader(reader);
+    }
+    elog(DEBUG1, "detach from dsm");
+    dsm_detach(seg);
+    GlobalCursorUnlock();
 }
 
 /*

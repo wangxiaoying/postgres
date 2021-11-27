@@ -16,6 +16,7 @@
 
 #include "access/sdir.h"
 #include "access/stratnum.h"
+#include "executor/tqueue.h"
 #include "lib/stringinfo.h"
 #include "nodes/bitmapset.h"
 #include "nodes/lockoptions.h"
@@ -158,6 +159,8 @@ typedef struct Plan
 	 */
 	Bitmapset  *extParam;
 	Bitmapset  *allParam;
+
+    TupleQueueReader *reader; // if reader is set, do not really execute the plan, read from reader
 } Plan;
 
 /* ----------------

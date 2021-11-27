@@ -1191,9 +1191,11 @@ shm_mq_wait_internal(shm_mq *mq, PGPROC **ptr, BackgroundWorkerHandle *handle)
 		{
 			result = false;
 			break;
-		}
-		if (result)
-			break;
+        }
+        if (result)
+        {
+            break;
+        }
 
 		if (handle != NULL)
 		{
