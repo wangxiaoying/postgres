@@ -4476,6 +4476,8 @@ PostgresMain(const char *dbname, const char *username)
 		if (ignore_till_sync && firstchar != EOF)
 			continue;
 
+        elog(DEBUG1, "get cmd: %c", firstchar);
+
 		switch (firstchar)
 		{
 			case 'Q':			/* simple query */

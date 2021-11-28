@@ -16,6 +16,7 @@
  */
 #include "postgres.h"
 
+#include "access/gcursor.h"
 #include "access/htup_details.h"
 #include "access/reloptions.h"
 #include "access/twophase.h"
@@ -2020,7 +2021,14 @@ UtilityReturnsTuples(Node *parsetree)
 					return false;
 				portal = GetPortalByName(stmt->portalname);
 				if (!PortalIsValid(portal))
+                {
+                    if (strncmp(GLOBAL_CURSOR_NAME_PREFIX, stmt->portalname, strlen(GLOBAL_CURSOR_NAME_PREFIX)) == 0)
+                    {
+                        return true;
+                    }
+                    elog(INFO, "cursor name not valid!");
 					return false;	/* not our business to raise error */
+                }
 				return portal->tupDesc ? true : false;
 			}
 
@@ -2073,7 +2081,16 @@ UtilityTupleDescriptor(Node *parsetree)
 					return NULL;
 				portal = GetPortalByName(stmt->portalname);
 				if (!PortalIsValid(portal))
-					return NULL;	/* not our business to raise error */
+                {
+                    if (IsGlobalCursor(stmt->portalname))
+                    {
+                        portal = InitGlobalCursorPortal(stmt->portalname);
+                    }
+                    else
+                    {
+					    return NULL;	/* not our business to raise error */
+                    }
+                }
 				return CreateTupleDescCopy(portal->tupDesc);
 			}
 
