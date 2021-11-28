@@ -105,6 +105,10 @@ PerformCursorOpen(ParseState *pstate, DeclareCursorStmt *cstmt, ParamListInfo pa
 		elog(ERROR, "non-SELECT statement in DECLARE CURSOR");
 
 	/* Plan the query, applying the specified options */
+    if (is_multi_cursor)
+    {
+        cstmt->options |= CURSOR_OPT_PARALLEL_OK;
+    }
 	plan = pg_plan_query(query, pstate->p_sourcetext, cstmt->options, params);
 
     /* Serialize plan to shared memory */

@@ -63,7 +63,7 @@ tqueueReceiveSlot(TupleTableSlot *slot, DestReceiver *self)
     {
         if (shm_mq_get_receiver(shm_mq_get_queue(tqueue->queue)) == NULL)
         {
-            elog(DEBUG1, "receiver not set yet!");
+            // elog(DEBUG1, "receiver not set yet!");
             return false;
         }
         tqueue->is_ready = true;

@@ -8,7 +8,7 @@
 #include "utils/elog.h"
 #include "utils/snapshot.h"
 
-#define MAX_SERIALIZED_PLAN_LEN 80000 // hardcode max plan size
+#define MAX_SERIALIZED_PLAN_LEN 100000 // hardcode max plan size
 
 int CURRENT_PARTITION_ID = -1;
 
@@ -62,6 +62,20 @@ void GlobalCursorSetPlan(PlannedStmt *pstmt)
         elog(ERROR, "statement is too long! %d > %d", pstmt_len, MAX_SERIALIZED_PLAN_LEN);
     }
     // elog(DEBUG1, "set serialized plan: %s (%d)", pstmt_data, pstmt_len);
+    ExplainState *es = NewExplainState();
+    es->analyze = false;
+    es->costs = false;
+    es->verbose = true;
+    es->buffers = false;
+    es->timing = false;
+    es->summary = false;
+    es->format = EXPLAIN_FORMAT_TEXT;
+    ExplainBeginOutput(es);
+    ExplainOnePlan(pstmt, NULL, es, "", NULL, NULL, NULL, NULL);
+    ExplainEndOutput(es);
+    Assert(es->indent == 0);
+    elog(DEBUG1, "plan: %s", es->str->data);
+
     memcpy(&GCurs->plan, pstmt_data, pstmt_len);
 }
 
@@ -69,21 +83,6 @@ PlannedStmt *GlobalCursorGetPlan(void)
 {
     PlannedStmt *pstmt;
     pstmt = (PlannedStmt *)stringToNode(&GCurs->plan);
-
-    // ExplainState *es = NewExplainState();
-    // es->analyze = false;
-    // es->costs = false;
-    // es->verbose = true;
-    // es->buffers = false;
-    // es->timing = false;
-    // es->summary = false;
-    // es->format = EXPLAIN_FORMAT_TEXT;
-    // ExplainBeginOutput(es);
-    // ExplainOnePlan(pstmt, NULL, es, "", NULL, NULL, NULL, NULL);
-    // ExplainEndOutput(es);
-    // Assert(es->indent == 0);
-    // elog(DEBUG1, "plan: %s", es->str->data);
-
     return pstmt;
 }
 

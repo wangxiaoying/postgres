@@ -72,7 +72,7 @@ static bool MixDestReceiveSlot(TupleTableSlot *slot, DestReceiver *self)
             res = myReceiver->tqueues[pos]->receiveSlot(slot, myReceiver->tqueues[pos]);
             if(!res)
             {
-                elog(DEBUG1, "tqueue %d is not ready yet!", pos);
+                // elog(DEBUG1, "tqueue %d is not ready yet!", pos);
             }
         }
         myReceiver->current_dest = (myReceiver->current_dest + 1) % myReceiver->partitions; 

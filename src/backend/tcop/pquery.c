@@ -17,6 +17,7 @@
 
 #include <limits.h>
 
+#include "access/gcursor.h"
 #include "access/xact.h"
 #include "commands/prepare.h"
 #include "executor/tstoreReceiver.h"
@@ -1405,6 +1406,11 @@ PortalRunFetch(Portal portal,
 
 	/* If supporting FETCH, portal can't be run-once. */
 	Assert(!portal->run_once);
+    if (IsGlobalCursor(portal->name) && portal->queryDesc->planstate->reader == NULL)
+    {
+        elog(DEBUG1, "enable run_once for global cursor that execute, for parallelism");
+        portal->run_once = true;
+    }
 
 	/*
 	 * Set up global portal context pointers.

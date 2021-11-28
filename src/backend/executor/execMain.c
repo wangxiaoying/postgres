@@ -1535,11 +1535,17 @@ ExecutePlan(EState *estate,
 	 * it to run without parallelism, because we might exit early.
 	 */
 	if (!execute_once)
+    {
+        elog(DEBUG1, "execute multiple times");
 		use_parallel_mode = false;
+    }
 
 	estate->es_use_parallel_mode = use_parallel_mode;
 	if (use_parallel_mode)
+    {
+        elog(DEBUG1, "parallel mode");
 		EnterParallelMode();
+    }
 
     if (planstate->reader != NULL)
     {
@@ -1578,7 +1584,7 @@ ExecutePlan(EState *estate,
 		 */
 		if (TupIsNull(slot))
         {
-            elog(DEBUG1, "is null, break! %p", slot);
+            // elog(DEBUG1, "is null, break! %p", slot);
 			break;
         }
 
