@@ -4475,6 +4475,8 @@ PostgresMain(const char *dbname, const char *username)
 		 */
 		if (ignore_till_sync && firstchar != EOF)
 			continue;
+        
+        elog(DEBUG1, "get cmd: %c", firstchar);
 
 		switch (firstchar)
 		{
@@ -4487,6 +4489,8 @@ PostgresMain(const char *dbname, const char *username)
 
 					query_string = pq_getmsgstring(&input_message);
 					pq_getmsgend(&input_message);
+
+                    elog(DEBUG1, "simple query: %s", query_string);
 
 					if (am_walsender)
 					{
@@ -4523,6 +4527,7 @@ PostgresMain(const char *dbname, const char *username)
 					}
 					pq_getmsgend(&input_message);
 
+                    elog(DEBUG1, "parse: %s, %s, %d, %d", query_string, stmt_name, paramTypes, numParams);
 					exec_parse_message(query_string, stmt_name,
 									   paramTypes, numParams);
 				}
@@ -4555,6 +4560,7 @@ PostgresMain(const char *dbname, const char *username)
 					max_rows = pq_getmsgint(&input_message, 4);
 					pq_getmsgend(&input_message);
 
+                    elog(DEBUG1, "execute portal_name: %s, max_rows: %d", portal_name, max_rows);
 					exec_execute_message(portal_name, max_rows);
 				}
 				break;
@@ -4649,7 +4655,8 @@ PostgresMain(const char *dbname, const char *username)
 					describe_type = pq_getmsgbyte(&input_message);
 					describe_target = pq_getmsgstring(&input_message);
 					pq_getmsgend(&input_message);
-
+                    
+                    elog(DEBUG1, "describe_type: %d, describe_target: %s", describe_type, describe_target);
 					switch (describe_type)
 					{
 						case 'S':
