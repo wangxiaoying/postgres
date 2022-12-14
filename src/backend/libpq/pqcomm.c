@@ -1469,6 +1469,7 @@ socket_is_send_pending(void)
 static int
 socket_putmessage(char msgtype, const char *s, size_t len)
 {
+    elog(DEBUG1, "put message: %c", msgtype);
 	uint32		n32;
 
 	Assert(msgtype != 0);

@@ -150,6 +150,7 @@ SendCopyBegin(CopyToState cstate)
 		pq_sendint16(&buf, format); /* per-column formats */
 	pq_endmessage(&buf);
 	cstate->copy_dest = COPY_FRONTEND;
+    pq_flush();
 }
 
 static void
