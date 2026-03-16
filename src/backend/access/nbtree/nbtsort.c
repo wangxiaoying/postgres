@@ -56,8 +56,6 @@
 #include "utils/rel.h"
 #include "utils/sortsupport.h"
 #include "utils/tuplesort.h"
-#include "utils/lsyscache.h"
-#include "nodes/nodeFuncs.h"
 
 
 /* Magic numbers for parallel state sharing */
@@ -288,126 +286,6 @@ static void _bt_parallel_scan_and_sort(BTSpool *btspool, BTSpool *btspool2,
 									   bool progress);
 
 
-
-static void
-log_clause(Expr *clause, int indent)
-{
-	if (IsA(clause, OpExpr))
-	{
-		OpExpr *op = (OpExpr *) clause;
-		Node   *left = get_leftop(clause);
-		Node   *right = get_rightop(clause);
-
-		if (IsA(left, Var) && IsA(right, Const))
-		{
-			Var   *var = (Var *) left;
-			Const *c   = (Const *) right;
-			Oid    opfamily = InvalidOid;
-			Oid    opcintype = InvalidOid;
-			int16  strategy = 0;
-
-			get_ordering_op_properties(op->opno,
-									   &opfamily, &opcintype, &strategy);
-
-			elog(INFO, "%*sOpExpr: var(attno=%d) op(%u) opfamily(%u) strategy(%d) const(type=%u, value=%ld, isnull=%d)",
-					indent, "",
-					var->varattno, op->opno, opfamily, (int) strategy,
-					c->consttype, (long) c->constvalue, c->constisnull);
-		}
-		else
-		{
-			elog(INFO, "%*sOpExpr: left=%d right=%d op=%u",
-					indent, "", nodeTag(left), nodeTag(right), op->opno);
-		}
-	}
-	else
-	{
-		elog(INFO, "%*sother node type: %d => %s",
-				indent, "", nodeTag(clause), nodeToString(clause));
-	}
-}
-
-/*
- * Convert an implicit-AND predicate list to DNF (list of conjunctions).
- * Each element of the returned list is a List of leaf clauses (one AND-term).
- */
-static List *
-predicate_to_dnf(List *predicate)
-{
-	List	   *dnf = list_make1(NIL);
-	ListCell   *lc;
-
-	foreach(lc, predicate)
-	{
-		Expr	   *clause = (Expr *) lfirst(lc);
-		List	   *alternatives;
-		List	   *new_dnf = NIL;
-		ListCell   *lc2,
-				   *lc3;
-
-		if (is_orclause(clause))
-			alternatives = ((BoolExpr *) clause)->args;
-		else
-			alternatives = list_make1(clause);
-
-		/* Cross-product: extend each existing conjunction with each alternative */
-		foreach(lc2, dnf)
-		{
-			List   *conj = (List *) lfirst(lc2);
-
-			foreach(lc3, alternatives)
-			{
-				Expr   *alt = (Expr *) lfirst(lc3);
-				List   *new_conj;
-
-				if (is_andclause(alt))
-					new_conj = list_concat_copy(conj, ((BoolExpr *) alt)->args);
-				else
-					new_conj = lappend(list_copy(conj), alt);
-
-				new_dnf = lappend(new_dnf, new_conj);
-			}
-		}
-
-		dnf = new_dnf;
-	}
-
-	return dnf;
-}
-
-static void log_predicate(IndexInfo *indexInfo)
-{
-	List	   *dnf;
-	ListCell   *lc;
-	int			disjunct_idx = 0;
-
-	if (indexInfo->ii_Predicate == NIL)
-	{
-		elog(INFO, "no predicate");
-		return;
-	}
-
-	dnf = predicate_to_dnf(indexInfo->ii_Predicate);
-
-	elog(INFO, "predicate in DNF has %d disjunct(s)", list_length(dnf));
-
-	foreach(lc, dnf)
-	{
-		List	   *conjunction = (List *) lfirst(lc);
-		ListCell   *lc2;
-
-		elog(INFO, "  disjunct %d (%d conjunct(s)):",
-				disjunct_idx++, list_length(conjunction));
-
-		foreach(lc2, conjunction)
-		{
-			Expr   *clause = (Expr *) lfirst(lc2);
-
-			log_clause(clause, 4);
-		}
-	}
-}
-
 /*
  *	btbuild() -- build a new btree index.
  */
@@ -431,8 +309,6 @@ btbuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	buildstate.spool2 = NULL;
 	buildstate.indtuples = 0;
 	buildstate.btleader = NULL;
-
-	log_predicate(indexInfo);
 
 	/*
 	 * We expect to be called exactly once for any index relation. If that's
