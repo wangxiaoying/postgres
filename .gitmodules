@@ -1,0 +1,3 @@
+[submodule "contrib/vbtree"]
+	path = contrib/vbtree
+	url = git@github.com:wangxiaoying/vbtree.git

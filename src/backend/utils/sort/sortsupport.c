@@ -166,8 +166,9 @@ PrepareSortSupportFromIndexRel(Relation indexRel, int16 strategy,
 
 	Assert(ssup->comparator == NULL);
 
-	if (indexRel->rd_rel->relam != BTREE_AM_OID)
-		elog(ERROR, "unexpected non-btree AM: %u", indexRel->rd_rel->relam);
+	/// NOTE: Do not check the AM since we are reusing btree's implementation for now.
+	// if (indexRel->rd_rel->relam != BTREE_AM_OID)
+	// 	elog(ERROR, "unexpected non-btree AM: %u", indexRel->rd_rel->relam);
 	if (strategy != BTGreaterStrategyNumber &&
 		strategy != BTLessStrategyNumber)
 		elog(ERROR, "unexpected sort support strategy: %d", strategy);
