@@ -1140,21 +1140,21 @@ typedef struct BTOptions
 	 ((BTOptions *) (relation)->rd_options)->fillfactor : \
 	 BTREE_DEFAULT_FILLFACTOR)
 	/// NOTE: Skip the assertion for reuse.
-	// (AssertMacro(relation->rd_rel->relkind == RELKIND_INDEX && \
-	// 			 relation->rd_rel->relam == BTREE_AM_OID), \
-	// (relation)->rd_options ? \
-	//  ((BTOptions *) (relation)->rd_options)->fillfactor : \
-	//  BTREE_DEFAULT_FILLFACTOR)
+	/*(AssertMacro(relation->rd_rel->relkind == RELKIND_INDEX && \
+				 relation->rd_rel->relam == BTREE_AM_OID), \
+	(relation)->rd_options ? \
+	 ((BTOptions *) (relation)->rd_options)->fillfactor : \
+	 BTREE_DEFAULT_FILLFACTOR)*/
 #define BTGetTargetPageFreeSpace(relation) \
 	(BLCKSZ * (100 - BTGetFillFactor(relation)) / 100)
 #define BTGetDeduplicateItems(relation) \
 	(((relation)->rd_options ? \
 	 ((BTOptions *) (relation)->rd_options)->deduplicate_items : true))
-	 /// NOTE: Skip the assertion for reuse.
-	// (AssertMacro(relation->rd_rel->relkind == RELKIND_INDEX && \
-	// 			 relation->rd_rel->relam == BTREE_AM_OID), \
-	// ((relation)->rd_options ? \
-	//  ((BTOptions *) (relation)->rd_options)->deduplicate_items : true))
+	/// NOTE: Skip the assertion for reuse.
+	/*(AssertMacro(relation->rd_rel->relkind == RELKIND_INDEX && \
+				 relation->rd_rel->relam == BTREE_AM_OID), \
+	((relation)->rd_options ? \
+	 ((BTOptions *) (relation)->rd_options)->deduplicate_items : true))*/
 
 /*
  * Constant definition for progress reporting.  Phase numbers must match
