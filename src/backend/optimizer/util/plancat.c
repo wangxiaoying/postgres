@@ -339,8 +339,11 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 
 				/*
 				 * Fetch the ordering information for the index, if any.
+				 * For btree and btree-compatible AMs (same opfamily semantics),
+				 * we can use opfamily OIDs directly as sort ordering.
 				 */
-				if (info->relam == BTREE_AM_OID)
+				if (info->relam == BTREE_AM_OID ||
+					(amroutine->amcanorder && amroutine->amconsistentordering))
 				{
 					/*
 					 * If it's a btree index, we can use its opfamily OIDs
