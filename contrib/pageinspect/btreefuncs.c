@@ -226,11 +226,11 @@ check_relation_block_range(Relation rel, int64 blkno)
 static void
 bt_index_block_validate(Relation rel, int64 blkno)
 {
-	if (!IS_INDEX(rel) || !IS_BTREE(rel))
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("\"%s\" is not a %s index",
-						RelationGetRelationName(rel), "btree")));
+	// if (!IS_INDEX(rel) || !IS_BTREE(rel))
+	// 	ereport(ERROR,
+	// 			(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+	// 			 errmsg("\"%s\" is not a %s index",
+	// 					RelationGetRelationName(rel), "btree")));
 
 	/*
 	 * Reject attempts to read non-local temporary relations; we would be
@@ -859,11 +859,11 @@ bt_metap(PG_FUNCTION_ARGS)
 	relrv = makeRangeVarFromNameList(textToQualifiedNameList(relname));
 	rel = relation_openrv(relrv, AccessShareLock);
 
-	if (!IS_INDEX(rel) || !IS_BTREE(rel))
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("\"%s\" is not a %s index",
-						RelationGetRelationName(rel), "btree")));
+	// if (!IS_INDEX(rel) || !IS_BTREE(rel))
+	// 	ereport(ERROR,
+	// 			(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+	// 			 errmsg("\"%s\" is not a %s index",
+	// 					RelationGetRelationName(rel), "btree")));
 
 	/*
 	 * Reject attempts to read non-local temporary relations; we would be
