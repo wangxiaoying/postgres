@@ -31,6 +31,12 @@ win32ver.rc
 *.exe
 lib*dll.def
 lib*.pc
+.vscode/
+data/
+build/
+logfile
+contrib/hypopg/
+contrib/pg_hint_plan/
 
 # Local excludes in root directory
 /GNUmakefile
